@@ -67,6 +67,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     effective.RENDER_MAX_CONCURRENCY = "1";
   }
 
+  // Keep production deployments webhook-only (including Vercel),
+  // so we never require long-lived polling workers there.
+  if ((effective.VERCEL || effective.NODE_ENV === "production") && effective.BOT_MODE === "polling") {
+    effective.BOT_MODE = "webhook";
+  }
+
   const parsed = EnvSchema.safeParse(effective);
 
   if (!parsed.success) {
@@ -79,4 +85,3 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     WEBHOOK_BASE_URL: parsed.data.WEBHOOK_BASE_URL?.replace(/\/+$/, "")
   };
 }
-

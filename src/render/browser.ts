@@ -1,11 +1,12 @@
 import type { Browser } from "playwright-core";
-import { chromium } from "playwright-core";
 
 const RENDER_TIMEOUT_MS = 25_000;
 
 let browserPromise: Promise<Browser> | undefined;
 
 async function launchBrowser(): Promise<Browser> {
+  const { chromium } = await import("playwright-core");
+
   if (process.env.VERCEL) {
     // Use @sparticuz/chromium-min for Vercel serverless environments.
     // The package bundles a stripped-down Chromium binary stored in /tmp on first run.
@@ -58,5 +59,4 @@ export async function closeBrowser(): Promise<void> {
 }
 
 export { RENDER_TIMEOUT_MS };
-
 
