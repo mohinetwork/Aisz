@@ -70,6 +70,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Keep production deployments webhook-only (including Vercel),
   // so we never require long-lived polling workers there.
   if ((effective.VERCEL || effective.NODE_ENV === "production") && effective.BOT_MODE === "polling") {
+    if (effective.NODE_ENV !== "test") {
+      console.warn("BOT_MODE=polling is not supported on Vercel/production; forcing BOT_MODE=webhook");
+    }
     effective.BOT_MODE = "webhook";
   }
 
