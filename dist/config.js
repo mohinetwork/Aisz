@@ -62,6 +62,14 @@ function loadConfig(env = process.env) {
     if (effective.VERCEL && !effective.RENDER_MAX_CONCURRENCY) {
         effective.RENDER_MAX_CONCURRENCY = "1";
     }
+    // Keep production deployments webhook-only (including Vercel),
+    // so we never require long-lived polling workers there.
+    if ((effective.VERCEL || effective.NODE_ENV === "production") && effective.BOT_MODE === "polling") {
+        if (effective.NODE_ENV !== "test") {
+            console.warn("BOT_MODE=polling is not supported on Vercel/production; forcing BOT_MODE=webhook");
+        }
+        effective.BOT_MODE = "webhook";
+    }
     const parsed = EnvSchema.safeParse(effective);
     if (!parsed.success) {
         const messages = parsed.error.issues.map((i) => `  • ${i.path.join(".")}: ${i.message}`).join("\n");
