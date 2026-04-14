@@ -1,25 +1,20 @@
 {
   "version": 2,
   "buildCommand": "npm run build",
-  "installCommand": "npm install",
+  "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install",
   "framework": null,
+  "functions": {
+    "api/webhook.ts": { "maxDuration": 60 },
+    "api/setup-webhook.ts": { "maxDuration": 30 }
+  },
   "routes": [
-    {
-      "src": "/api/webhook",
-      "dest": "/api/webhook.ts"
-    },
-    {
-      "src": "/telegram/webhook/(.*)",
-      "dest": "/api/webhook"
-    },
-    {
-      "src": "/(.*)",
-      "status": 404,
-      "dest": "/api/webhook"
-    }
+    { "src": "/healthz", "dest": "/api/webhook" },
+    { "src": "/api/setup-webhook", "dest": "/api/setup-webhook.ts" },
+    { "src": "/api/webhook", "dest": "/api/webhook.ts" },
+    { "src": "/telegram/webhook/(.*)", "dest": "/api/webhook.ts" },
+    { "src": "/(.*)", "status": 404, "headers": { "content-type": "application/json" }, "continue": false }
   ],
   "env": {
-    "BOT_MODE": "webhook",
-    "DATA_DIR": "/tmp"
+    "BOT_MODE": "webhook"
   }
 }
