@@ -36,17 +36,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.RENDER_TIMEOUT_MS = void 0;
 exports.getBrowser = getBrowser;
 exports.closeBrowser = closeBrowser;
+const playwright_core_1 = require("playwright-core");
 const RENDER_TIMEOUT_MS = 25_000;
 exports.RENDER_TIMEOUT_MS = RENDER_TIMEOUT_MS;
 let browserPromise;
 async function launchBrowser() {
-    const { chromium } = await Promise.resolve().then(() => __importStar(require("playwright-core")));
     if (process.env.VERCEL) {
         // Use @sparticuz/chromium-min for Vercel serverless environments.
         // The package bundles a stripped-down Chromium binary stored in /tmp on first run.
         const chromiumSparticuz = await Promise.resolve().then(() => __importStar(require("@sparticuz/chromium-min")));
         const executablePath = await chromiumSparticuz.default.executablePath();
-        return chromium.launch({
+        return playwright_core_1.chromium.launch({
             args: [
                 ...chromiumSparticuz.default.args,
                 "--disable-dev-shm-usage",
@@ -59,7 +59,7 @@ async function launchBrowser() {
         });
     }
     // Local development — use the Playwright-managed Chromium
-    return chromium.launch({
+    return playwright_core_1.chromium.launch({
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
     });
