@@ -1,7 +1,7 @@
 import type { Logger } from "pino";
 import type { RenderPayloadSingle, RenderPayloadTop } from "../types/market";
 import type { ThemeId } from "../themes";
-import { getBrowser } from "./browser";
+import { getBrowser, RENDER_TIMEOUT_MS } from "./browser";
 import { buildSingleCardHtml, buildTopCollageHtml } from "./templates";
 
 const SINGLE_DIMENSIONS = { width: 2048, height: 1316 };
@@ -41,6 +41,16 @@ interface CardRendererOptions {
   maxConcurrency?: number;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Render timeout after ${ms}ms (${label})`)), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 export class CardRenderer {
   private readonly gate: RenderGate;
 
@@ -50,7 +60,7 @@ export class CardRenderer {
     this.gate = new RenderGate(safeMax);
   }
 
-  private async htmlToPng(html: string, dimensions: RenderDimensions): Promise<Buffer> {
+  private async htmlToPng(html: string, dimensions: RenderDimensions, label: string): Promise<Buffer> {
     return this.gate.run(async () => {
       const browser = await getBrowser();
       const page = await browser.newPage({
@@ -58,30 +68,39 @@ export class CardRenderer {
           width: dimensions.width,
           height: dimensions.height
         },
-        // High-density rendering keeps gradients and type sharp after Telegram compression.
         deviceScaleFactor: DEVICE_SCALE_FACTOR
       });
 
       try {
-        await page.setContent(html, { waitUntil: "load" });
-        const screenshot = await page.screenshot({ type: "png", scale: "css" });
-        return screenshot as Buffer;
+        await withTimeout(
+          page.setContent(html, { waitUntil: "load" }),
+          RENDER_TIMEOUT_MS,
+          `setContent:${label}`
+        );
+        const screenshot = await withTimeout(
+          page.screenshot({ type: "png", scale: "css" }) as Promise<Buffer>,
+          RENDER_TIMEOUT_MS,
+          `screenshot:${label}`
+        );
+        return screenshot;
       } finally {
-        await page.close();
+        await page.close().catch((e) => {
+          this.logger.debug({ err: String(e) }, "Page close error (ignored)");
+        });
       }
     });
   }
 
   async renderSingleCard(payload: RenderPayloadSingle): Promise<Buffer> {
     const startedAt = Date.now();
-    const image = await this.htmlToPng(buildSingleCardHtml(payload), SINGLE_DIMENSIONS);
+    const image = await this.htmlToPng(buildSingleCardHtml(payload), SINGLE_DIMENSIONS, "single");
     this.logger.info({ renderMs: Date.now() - startedAt, kind: "single" }, "Rendered card image");
     return image;
   }
 
   async renderTopCollage(payload: RenderPayloadTop): Promise<Buffer> {
     const startedAt = Date.now();
-    const image = await this.htmlToPng(buildTopCollageHtml(payload), TOP_DIMENSIONS);
+    const image = await this.htmlToPng(buildTopCollageHtml(payload), TOP_DIMENSIONS, "top");
     this.logger.info({ renderMs: Date.now() - startedAt, kind: "top" }, "Rendered card image");
     return image;
   }
@@ -102,3 +121,4 @@ export class CardRenderer {
     });
   }
 }
+

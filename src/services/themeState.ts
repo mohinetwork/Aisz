@@ -1,7 +1,8 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import type { Logger } from "pino";
 import { DEFAULT_THEME_ID, parseThemeId, type ThemeId } from "../themes";
+import type { KvStorage } from "./storage";
+
+const STATE_KEY = "theme-state";
 
 interface PendingTheme {
   themeId: ThemeId;
@@ -16,7 +17,7 @@ interface GroupThemeState {
   updatedAtIso: string;
 }
 
-interface ThemeStateFile {
+interface ThemeStateData {
   groups: Record<string, GroupThemeState>;
   pendingThemesByUser: Record<string, PendingTheme>;
   userGroups: Record<string, number[]>;
@@ -28,42 +29,39 @@ interface ListedGroupTheme {
   themeId: ThemeId;
 }
 
-const EMPTY_STATE: ThemeStateFile = {
+const EMPTY_STATE: ThemeStateData = {
   groups: {},
   pendingThemesByUser: {},
   userGroups: {}
 };
 
 export class ThemeStateStore {
-  private data: ThemeStateFile = { ...EMPTY_STATE };
-  private readonly filePath: string;
+  private data: ThemeStateData = { ...EMPTY_STATE };
   private writeQueue: Promise<void> = Promise.resolve();
 
-  constructor(dataDir: string, private readonly logger: Logger) {
-    this.filePath = path.join(dataDir, "theme-state.json");
-  }
+  constructor(
+    private readonly storage: KvStorage,
+    private readonly logger: Logger
+  ) {}
 
   async init(): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-
     try {
-      const file = await fs.readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(file) as Partial<ThemeStateFile>;
-
+      const raw = await this.storage.get(STATE_KEY);
+      if (!raw) {
+        this.data = { ...EMPTY_STATE };
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<ThemeStateData>;
       this.data = {
         groups: parsed.groups ?? {},
         pendingThemesByUser: parsed.pendingThemesByUser ?? {},
         userGroups: parsed.userGroups ?? {}
       };
-
       this.sanitize();
+      this.logger.info("Theme state loaded from storage");
     } catch (error) {
-      const err = error as NodeJS.ErrnoException;
-      if (err.code !== "ENOENT") {
-        this.logger.warn({ err: err.message }, "Failed to read theme state file; using empty state");
-      }
+      this.logger.warn({ err: String(error) }, "Failed to load theme state; starting with empty state");
       this.data = { ...EMPTY_STATE };
-      await this.flush();
     }
   }
 
@@ -72,7 +70,6 @@ export class ThemeStateStore {
     if (!entry) {
       return DEFAULT_THEME_ID;
     }
-
     return parseThemeId(entry.themeId) ?? DEFAULT_THEME_ID;
   }
 
@@ -81,7 +78,6 @@ export class ThemeStateStore {
     if (!entry) {
       return undefined;
     }
-
     return {
       chatId: entry.chatId,
       title: entry.title,
@@ -91,7 +87,6 @@ export class ThemeStateStore {
 
   listUserGroups(userId: number): ListedGroupTheme[] {
     const chatIds = this.data.userGroups[String(userId)] ?? [];
-
     return chatIds
       .map((chatId) => this.getGroup(chatId))
       .filter((group): group is ListedGroupTheme => group !== undefined);
@@ -102,7 +97,6 @@ export class ThemeStateStore {
     if (!pending) {
       return undefined;
     }
-
     return parseThemeId(pending.themeId);
   }
 
@@ -126,7 +120,6 @@ export class ThemeStateStore {
     actorUserId: number;
   }): Promise<void> {
     const key = String(options.chatId);
-
     this.data.groups[key] = {
       chatId: options.chatId,
       title: options.title,
@@ -134,7 +127,6 @@ export class ThemeStateStore {
       updatedByUserId: options.actorUserId,
       updatedAtIso: new Date().toISOString()
     };
-
     this.linkUserGroupInMemory(options.actorUserId, options.chatId);
     await this.enqueueFlush();
   }
@@ -147,7 +139,6 @@ export class ThemeStateStore {
   private linkUserGroupInMemory(userId: number, chatId: number): void {
     const userKey = String(userId);
     const list = this.data.userGroups[userKey] ?? [];
-
     if (!list.includes(chatId)) {
       list.push(chatId);
       this.data.userGroups[userKey] = list;
@@ -157,39 +148,32 @@ export class ThemeStateStore {
   private sanitize(): void {
     for (const [chatId, group] of Object.entries(this.data.groups)) {
       const themeId = parseThemeId(group.themeId) ?? DEFAULT_THEME_ID;
-      this.data.groups[chatId] = {
-        ...group,
-        chatId: Number(chatId),
-        themeId
-      };
+      this.data.groups[chatId] = { ...group, chatId: Number(chatId), themeId };
     }
-
     for (const [userId, pending] of Object.entries(this.data.pendingThemesByUser)) {
       const themeId = parseThemeId(pending.themeId);
       if (!themeId) {
         delete this.data.pendingThemesByUser[userId];
         continue;
       }
-      this.data.pendingThemesByUser[userId] = {
-        ...pending,
-        themeId
-      };
+      this.data.pendingThemesByUser[userId] = { ...pending, themeId };
     }
-
     for (const [userId, groupList] of Object.entries(this.data.userGroups)) {
-      this.data.userGroups[userId] = Array.from(new Set(groupList.map((value) => Number(value)).filter(Boolean)));
+      this.data.userGroups[userId] = Array.from(new Set(groupList.map((v) => Number(v)).filter(Boolean)));
     }
   }
 
   private async enqueueFlush(): Promise<void> {
-    this.writeQueue = this.writeQueue.then(() => this.flush()).catch((error) => {
-      this.logger.error({ err: String(error) }, "Failed to persist theme state");
-    });
-
+    this.writeQueue = this.writeQueue
+      .then(() => this.flush())
+      .catch((error) => {
+        this.logger.error({ err: String(error) }, "Failed to persist theme state");
+      });
     await this.writeQueue;
   }
 
   private async flush(): Promise<void> {
-    await fs.writeFile(this.filePath, JSON.stringify(this.data, null, 2), "utf8");
+    await this.storage.set(STATE_KEY, JSON.stringify(this.data));
   }
 }
+
