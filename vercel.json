@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "framework": null,
+  "routes": [
+    {
+      "src": "/api/webhook",
+      "dest": "/api/webhook.ts"
+    },
+    {
+      "src": "/telegram/webhook/(.*)",
+      "dest": "/api/webhook"
+    },
+    {
+      "src": "/(.*)",
+      "status": 404,
+      "dest": "/api/webhook"
+    }
+  ],
+  "env": {
+    "BOT_MODE": "webhook",
+    "DATA_DIR": "/tmp"
+  }
+}
